@@ -6,7 +6,11 @@ class Settings(BaseSettings):
     # 项目基本配置
     PROJECT_NAME: str = "FastAPI Device Manager"
     API_V1_STR: str = "/api/v1"
-    
+    # 上传文件配置
+    UPLOAD_DIR: str = "uploads"  # 相对于项目根目录的上传文件夹路径
+    # 时区设置
+    TIMEZONE: str = ""
+
     # MySQL配置
     MYSQL_HOST: str = "localhost"
     MYSQL_PORT: int = 3306

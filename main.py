@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.v1 import device
+from app.api.v1 import device, upload
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -10,6 +10,7 @@ app = FastAPI(
 
 # 注册路由
 app.include_router(device.router, prefix=settings.API_V1_STR)
+app.include_router(upload.router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():

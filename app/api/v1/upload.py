@@ -3,24 +3,34 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.upload import UploadCreate, UploadInDB
+from app.models.common import ResponseModel
 from app.services.upload import UploadService
 from app.core.config import settings
+from app.core.status_code import StatusCode
 
 router = APIRouter()
 
-@router.post("/upload/", response_model=UploadInDB)
+@router.post("/upload/", response_model=ResponseModel[UploadInDB])
 def create_upload(upload: UploadCreate, db: Session = Depends(get_db)):
     """创建上传记录"""
     try:
-        return UploadService.create_upload(
+        upload_data = UploadService.create_upload(
             db=db, 
             upload_data=upload,
             upload_dir=settings.UPLOAD_DIR
         )
+        return ResponseModel(
+            code=StatusCode.CREATED.value,
+            message=StatusCode.get_message(StatusCode.CREATED.value),
+            data=upload_data
+        )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return ResponseModel(
+            code=StatusCode.UPLOAD_FAILED.value,
+            message=str(e)
+        )
 
-@router.get("/uploads/{device_name}", response_model=List[UploadInDB])
+@router.get("/uploads/{device_name}", response_model=ResponseModel[List[UploadInDB]])
 def read_device_uploads(
     device_name: str,
     skip: int = 0,
@@ -34,4 +44,4 @@ def read_device_uploads(
         skip=skip,
         limit=limit
     )
-    return uploads
+    return ResponseModel(data=uploads)

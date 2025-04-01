@@ -3,22 +3,23 @@ from datetime import datetime
 from sqlalchemy import Column, String, BigInteger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import relationship
-from app.core.database import Base
+from app.db.base_class import Base
 
 # SQLAlchemy模型
 class Device(Base):
     """设备数据库模型"""
     __tablename__ = "pre_devices"
 
-    device_name = Column(String(50), primary_key=True, comment="设备名称，唯一标识符")
+    device_name = Column(String(50), primary_key=True, index=True, comment="设备名称")
     device_id = Column(String(255), nullable=False, comment="设备物理ID，如adb设备ID")
     device_path = Column(String(255), nullable=False, comment="设备存储根路径")
     password = Column(String(255), nullable=False, comment="设备密码")
-    createtime = Column(BigInteger, comment="创建时间")
-    updatetime = Column(BigInteger, comment="更新时间")
+    createtime = Column(BigInteger, nullable=True, comment="创建时间")
+    updatetime = Column(BigInteger, nullable=True, comment="更新时间")
 
     # 添加与Upload的关系
     uploads = relationship("Upload", back_populates="device", cascade="all, delete-orphan")
+    tasks = relationship("Task", back_populates="device", cascade="all, delete-orphan")
 
     def to_dict(self):
         """转换为字典"""

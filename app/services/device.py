@@ -5,9 +5,14 @@ import time
 
 class DeviceService:
     @staticmethod
-    def get_device(db: Session, device_name: str) -> Optional[Device]:
-        """获取单个设备"""
+    def get_device_by_name(db: Session, device_name: str) -> Optional[Device]:
+        """通过name获取单个设备"""
         return db.query(Device).filter(Device.device_name == device_name).first()
+
+    @staticmethod
+    def get_device(db: Session, id: int) -> Optional[Device]:
+        """获取单个设备"""
+        return db.query(Device).filter(Device.id == id).first()
 
     @staticmethod
     def get_devices(db: Session, skip: int = 0, limit: int = 100) -> List[Device]:
@@ -24,14 +29,19 @@ class DeviceService:
             updatetime=current_time
         )
         db.add(db_device)
-        db.commit()
-        db.refresh(db_device)
-        return db_device
+        try:
+            db.commit()
+            db.refresh(db_device)
+            return db_device
+        except Exception as e:
+            db.rollback()
+            raise e
 
     @staticmethod
-    def update_device(db: Session, device_name: str, device: DeviceUpdate) -> Optional[Device]:
+    def update_device(db: Session, id: str, device: DeviceUpdate) -> Optional[Device]:
         """更新设备"""
-        db_device = DeviceService.get_device(db, device_name)
+        db_device = DeviceService.get_device(db, id)
+
         if not db_device:
             return None
         
@@ -41,17 +51,25 @@ class DeviceService:
             for key, value in update_data.items():
                 setattr(db_device, key, value)
             
-            db.commit()
-            db.refresh(db_device)
+            try:
+                db.commit()
+                db.refresh(db_device)
+            except Exception as e:
+                db.rollback()
+                raise e
         return db_device
 
     @staticmethod
-    def delete_device(db: Session, device_name: str) -> bool:
+    def delete_device(db: Session, id: str) -> bool:
         """删除设备"""
-        db_device = DeviceService.get_device(db, device_name)
+        db_device = DeviceService.get_device(db, id)
         if not db_device:
             return False
         
-        db.delete(db_device)
-        db.commit()
-        return True
+        try:
+            db.delete(db_device)
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            raise e

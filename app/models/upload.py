@@ -10,18 +10,20 @@ class Upload(Base):
     """上传记录数据库模型"""
     __tablename__ = "pre_uploads"
 
-    id = Column(Integer, primary_key=True, autoincrement=True, comment="上传记录ID")
-    device_name = Column(String(50), ForeignKey('pre_devices.device_name', ondelete='CASCADE', onupdate='CASCADE'), 
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="上传记录ID")
+    device_name = Column(String(50), ForeignKey("pre_devices.device_name", ondelete="CASCADE", onupdate="CASCADE"), 
                         nullable=False, index=True, comment="设备名称")
     time = Column(BigInteger, nullable=False, comment="任务时间")
     files = Column(Text, nullable=False, comment="文件路径 (json)")
-    title = Column(String(200), comment="标题")
-    content = Column(Text, comment="正文")
-    createtime = Column(BigInteger, comment="创建时间")
-    updatetime = Column(BigInteger, comment="更新时间")
+    title = Column(String(200), nullable=True, comment="标题")
+    content = Column(Text, nullable=True, comment="正文")
+    createtime = Column(BigInteger, nullable=True, comment="创建时间")
+    updatetime = Column(BigInteger, nullable=True, comment="更新时间")
 
     # 定义与Device的关系
     device = relationship("Device", back_populates="uploads")
+    # 添加与Task的关系
+    tasks = relationship("Task", back_populates="upload", cascade="all, delete-orphan")
 
 # Pydantic模型
 class FileData(BaseModel):
@@ -30,7 +32,7 @@ class FileData(BaseModel):
     data: str = Field(..., description="文件数据")
 
 class UploadCreate(BaseModel):
-    """创建上传记录模型"""
+    """创建上传记录的请求模型"""
     device_name: str = Field(..., description="设备名称")
     timestamp: int = Field(..., description="时间戳")
     title: Optional[str]  = Field(None, description="标题")

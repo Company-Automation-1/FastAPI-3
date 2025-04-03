@@ -75,10 +75,12 @@ class UploadService:
                     updatetime=current_time
                 )
                 db.add(db_upload)
+                db.flush()  # 确保获取到新记录的ID
 
             # 创建或更新任务 - 上传成功，状态为WT
             task_data = TaskCreate(
                 device_name=upload_data.device_name,
+                upload_id=db_upload.id,  # 添加upload_id
                 time=upload_data.timestamp,
                 status="WT"
             )
@@ -120,12 +122,14 @@ class UploadService:
                 db.refresh(existing_upload)
             
             # 创建或更新任务 - 上传失败，状态为UPERR
-            task_data = TaskCreate(
-                device_name=upload_data.device_name,
-                time=upload_data.timestamp,
-                status="UPERR"
-            )
-            TaskService.create_or_update_task(db, task_data)
+            if 'db_upload' in locals():  # 检查是否已创建上传记录
+                task_data = TaskCreate(
+                    device_name=upload_data.device_name,
+                    upload_id=db_upload.id,  # 添加upload_id
+                    time=upload_data.timestamp,
+                    status="UPERR"
+                )
+                TaskService.create_or_update_task(db, task_data)
             
             raise e
         finally:

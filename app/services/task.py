@@ -9,9 +9,10 @@ class TaskService:
         """创建或更新任务"""
         current_time = int(time.time())
         
-        # 查找是否存在相同device_name和time的任务
+        # 查找是否存在相同device_name、upload_id和time的任务
         existing_task = db.query(Task).filter(
             Task.device_name == task.device_name,
+            Task.upload_id == task.upload_id,
             Task.time == task.time
         ).first()
         
@@ -24,6 +25,7 @@ class TaskService:
             # 创建新任务
             db_task = Task(
                 device_name=task.device_name,
+                upload_id=task.upload_id,
                 time=task.time,
                 status=task.status,
                 createtime=current_time,
@@ -59,4 +61,12 @@ class TaskService:
         db_task.updatetime = int(time.time())
         db.commit()
         db.refresh(db_task)
-        return db_task 
+        return db_task
+
+    @staticmethod
+    def get_tasks_by_upload(db: Session, upload_id: int) -> List[Task]:
+        """获取上传记录关联的任务列表"""
+        return db.query(Task)\
+            .filter(Task.upload_id == upload_id)\
+            .order_by(Task.time.desc())\
+            .all() 

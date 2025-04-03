@@ -24,7 +24,14 @@ def create_upload(upload: UploadCreate, db: Session = Depends(get_db)):
             message=StatusCode.get_message(StatusCode.CREATED.value),
             data=upload_data
         )
+    except ValueError as ve:
+        # 处理业务逻辑错误（如设备不存在）
+        return ResponseModel(
+            code=StatusCode.VALIDATION_ERROR.value,
+            message=str(ve)
+        )
     except Exception as e:
+        # 处理其他错误（如文件系统错误）
         return ResponseModel(
             code=StatusCode.UPLOAD_FAILED.value,
             message=str(e)
@@ -38,10 +45,20 @@ def read_device_uploads(
     db: Session = Depends(get_db)
 ):
     """获取设备的上传记录"""
-    uploads = UploadService.get_uploads_by_device(
-        db=db,
-        device_name=device_name,
-        skip=skip,
-        limit=limit
-    )
-    return ResponseModel(data=uploads)
+    try:
+        uploads = UploadService.get_uploads_by_device(
+            db=db,
+            device_name=device_name,
+            skip=skip,
+            limit=limit
+        )
+        return ResponseModel(
+            code=StatusCode.SUCCESS.value,
+            message=StatusCode.get_message(StatusCode.SUCCESS.value),
+            data=uploads
+        )
+    except Exception as e:
+        return ResponseModel(
+            code=StatusCode.QUERY_FAILED.value,
+            message=str(e)
+        )

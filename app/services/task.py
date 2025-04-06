@@ -2,6 +2,9 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.models.task import Task, TaskCreate, TaskStatus
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 class TaskService:
     @staticmethod
@@ -33,6 +36,7 @@ class TaskService:
             )
             db.add(db_task)
         
+        db.commit()
         return db_task
 
     @staticmethod
@@ -48,20 +52,44 @@ class TaskService:
     @staticmethod
     def get_task(db: Session, task_id: int) -> Optional[Task]:
         """获取单个任务"""
-        return db.query(Task).filter(Task.id == task_id).first()
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                logger.error(f"找不到任务: {task_id}")
+            return task
+        except Exception as e:
+            logger.error(f"获取任务失败: {str(e)}")
+            return None
+
+    @staticmethod
+    def get_tasks_by_status(db: Session, status: TaskStatus) -> List[Task]:
+        """获取指定状态的任务列表"""
+        try:
+            tasks = db.query(Task).filter(Task.status == status).all()
+            logger.info(f"获取到 {len(tasks)} 个状态为 {status} 的任务")
+            return tasks
+        except Exception as e:
+            logger.error(f"获取任务列表失败: {str(e)}")
+            return []
 
     @staticmethod
     def update_task_status(db: Session, task_id: int, status: TaskStatus) -> Optional[Task]:
         """更新任务状态"""
-        db_task = TaskService.get_task(db, task_id)
-        if not db_task:
+        try:
+            task = db.query(Task).filter(Task.id == task_id).first()
+            if task:
+                task.status = status
+                task.updatetime = int(time.time())
+                db.commit()
+                db.refresh(task)
+                logger.info(f"任务 {task_id} 状态更新为 {status}")
+                return task
+            else:
+                logger.error(f"找不到任务: {task_id}")
+                return None
+        except Exception as e:
+            logger.error(f"更新任务状态失败: {str(e)}")
             return None
-        
-        db_task.status = status.value
-        db_task.updatetime = int(time.time())
-        db.commit()
-        db.refresh(db_task)
-        return db_task
 
     @staticmethod
     def get_tasks_by_upload(db: Session, upload_id: int) -> List[Task]:

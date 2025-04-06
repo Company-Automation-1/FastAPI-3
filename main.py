@@ -3,6 +3,13 @@ from fastapi import FastAPI
 from app.core.config import settings
 from app.api.v1 import device, upload
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.scheduler import TaskScheduler
+from app.services.adb_transfer import ADBTransferService
+# import asyncio
+# from app.core.logger import setup_logger
+# import logging
+# from app.db.session import engine
+# from sqlalchemy import text
 
 # 项目基本配置
 PROJECT_NAME: str = "FastAPI Device Manager"
@@ -78,6 +85,51 @@ app.add_middleware(
 # 注册路由
 app.include_router(device.router, prefix=API_V1_STR)
 app.include_router(upload.router, prefix=API_V1_STR)
+
+# 全局服务实例
+adb_transfer_service = None
+task_scheduler = None
+
+@app.on_event("startup")
+async def startup_event():
+    """服务启动时初始化"""
+    global adb_transfer_service, task_scheduler
+    
+#     # 初始化日志
+#     setup_logger()
+    
+#     # 测试数据库连接
+#     try:
+#         with engine.connect() as conn:
+#             conn.execute(text("SELECT 1"))
+#         logging.info("数据库连接成功")
+#     except Exception as e:
+#         logging.error(f"数据库连接失败: {str(e)}")
+#         raise
+    
+    # 初始化ADB传输服务
+    adb_transfer_service = ADBTransferService()
+    
+    # 初始化任务调度器 - 使用ADBTransferService的execute_transfer方法作为任务执行器
+    task_scheduler = TaskScheduler(
+        task_executor=adb_transfer_service.execute_transfer,
+        check_interval=30,
+        max_retries=3,
+        retry_delay=2,
+        max_concurrent_tasks=5
+    )
+    await task_scheduler.start()
+    
+#     logging.info("所有服务已启动")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """服务关闭时清理"""
+    global task_scheduler
+    if task_scheduler:
+        await task_scheduler.stop()
+    # logging.info("所有服务已停止")
+    print("所有服务已停止")
 
 @app.get("/")
 async def root():

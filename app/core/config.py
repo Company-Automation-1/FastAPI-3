@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None
     REDIS_DB: int = 0
 
+    # ADB配置
+    ADB_PATH: str = "adb"  # adb可执行文件的路径
+    ADB_SERVER_HOST: str = "127.0.0.1"  # ADB服务器主机
+    ADB_SERVER_PORT: int = 5037  # ADB服务器端口
+
     @property
     def MYSQL_URL(self) -> str:
         password = quote_plus(self.MYSQL_PASSWORD)

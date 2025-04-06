@@ -5,14 +5,26 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10.0"
 dependencies = [
+    "aiomysql>=0.2.0",
+    "aioredis>=2.0.1",
+    "apscheduler>=3.11.0",
     "fastapi>=0.115.12",
+    "httpx>=0.28.1",
     "mysql-connector-python>=9.2.0",
     "pydantic>=2.11.1",
     "pydantic-settings>=2.8.1",
     "pymysql>=1.1.1",
+    "pytest>=8.3.5",
+    "pytest-cov>=6.0.0",
     "python-dotenv>=1.1.0",
     "pytz>=2025.2",
     "redis>=5.2.1",
     "sqlalchemy>=2.0.40",
+    "uiautomator2>=3.2.9",
     "uvicorn[standard]>=0.34.0",
 ]
+
+[tool.pytest]
+pythonpath = "."
+testpaths = ["app/tests"]
+python_files = "test_*.py"

@@ -39,6 +39,8 @@ class StatusCode(Enum):
     ADB_DEVICE_NOT_FOUND = 4003
     ADB_PERMISSION_DENIED = 4004
     
+    VALIDATION_ERROR = 422
+    
     @classmethod
     def get_message(cls, code: int) -> str:
         """获取状态码对应的消息"""
@@ -78,6 +80,8 @@ class StatusCode(Enum):
             4001: "ADB连接错误",
             4002: "ADB命令执行错误",
             4003: "ADB设备未找到",
-            4004: "ADB权限不足"
+            4004: "ADB权限不足",
+            
+            422: "数据验证错误"
         }
         return messages.get(code, "未知错误") 

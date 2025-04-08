@@ -2,7 +2,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.models.task import Task, TaskStatus
 from app.models.upload import Upload
-from app.schemas.task import TaskCreate, TaskUpdate
+from app.schemas.task import TaskCreate, TaskUpdate, TaskQuery, TaskResponse
 from app.core.config import settings
 from app.utils.file import get_file_paths
 from app.core.status_code import StatusCode
@@ -19,16 +19,49 @@ logger = logging.getLogger(__name__)
 
 class TaskService:
     @staticmethod
-    def get_tasks(db: Session, skip: int = 0, limit: int = 100):
-        """获取任务列表"""
+    def get_tasks(db: Session, query_params: TaskQuery):
+        """获取任务列表，支持条件查询和分页"""
         try:
-            tasks = db.query(Task).offset(skip).limit(limit).all()
-            # 使用关联关系获取标题和内容
+            # 构建基础查询
+            query = db.query(Task)
+            
+            # 添加过滤条件
+            if query_params.device_name:
+                query = query.filter(Task.device_name == query_params.device_name)
+            if query_params.status:
+                # 将状态转换为大写进行比较
+                query = query.filter(Task.status == query_params.status.upper())
+            if query_params.start_time:
+                query = query.filter(Task.time >= query_params.start_time)
+            if query_params.end_time:
+                query = query.filter(Task.time <= query_params.end_time)
+            if query_params.title:
+                # 使用join和like进行标题模糊查询
+                query = query.join(Upload).filter(Upload.title.like(f"%{query_params.title}%"))
+            
+            # 计算总数
+            total = query.count()
+            
+            # 添加排序和分页
+            query = query.order_by(Task.id.desc())
+            skip = (query_params.page - 1) * query_params.page_size
+            tasks = query.offset(skip).limit(query_params.page_size).all()
+            
+            # 转换为TaskResponse对象
+            task_responses = []
             for task in tasks:
+                task_dict = task.to_dict()
                 if task.upload:
-                    task.title = task.upload.title
-                    task.content = task.upload.content
-            return tasks
+                    task_dict["title"] = task.upload.title
+                    task_dict["content"] = task.upload.content
+                task_responses.append(TaskResponse(**task_dict))
+            
+            return {
+                "data": task_responses,
+                "total": total,
+                "page": query_params.page,
+                "page_size": query_params.page_size
+            }
         except Exception as e:
             logger.error(f"获取任务列表失败: {str(e)}")
             raise e

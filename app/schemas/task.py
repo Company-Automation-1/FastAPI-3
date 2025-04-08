@@ -34,4 +34,28 @@ class TaskInDB(TaskBase):
     content: Optional[str] = Field(None, description="正文")
 
     class Config:
-        from_attributes = True 
+        from_attributes = True
+
+class TaskResponse(TaskInDB):
+    """任务响应模型"""
+    pass
+
+class TaskQuery(BaseModel):
+    """任务查询参数模型"""
+    device_name: Optional[str] = Field(None, description="设备名称")
+    status: Optional[str] = Field(None, description="任务状态")
+    start_time: Optional[int] = Field(None, description="开始时间戳")
+    end_time: Optional[int] = Field(None, description="结束时间戳")
+    title: Optional[str] = Field(None, description="标题模糊查询")
+    current: int = Field(1, description="当前页码")
+    pageSize: int = Field(10, description="每页数量")
+
+    @property
+    def page(self) -> int:
+        """获取页码"""
+        return self.current
+
+    @property
+    def page_size(self) -> int:
+        """获取每页数量"""
+        return self.pageSize 

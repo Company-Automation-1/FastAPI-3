@@ -5,7 +5,7 @@ from app.db.session import get_db
 from app.models.task import Task, TaskStatus
 from app.models.upload import Upload
 from app.schemas.upload import FileData
-from app.schemas.task import TaskCreate, TaskInDB, TaskUpdate
+from app.schemas.task import TaskCreate, TaskInDB, TaskUpdate, TaskQuery, TaskResponse
 from app.services.upload import UploadService
 from app.services.task import TaskService
 from app.core.config import settings
@@ -25,18 +25,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-@router.get("/tasks/", response_model=ResponseModel[List[TaskInDB]])
+@router.get("/tasks/", response_model=ResponseModel[List[TaskResponse]])
 async def get_tasks(
-    skip: int = 0,
-    limit: int = 100,
+    query: TaskQuery = Depends(),
     db: Session = Depends(get_db)
 ):
     """
-    获取任务列表
+    获取任务列表，支持条件查询和分页
     """
     try:
-        tasks = TaskService.get_tasks(db, skip, limit)
-        return ResponseModel(data=tasks)
+        result = TaskService.get_tasks(db, query)
+        return ResponseModel(
+            data=result["data"],
+            total=result["total"],
+            page=result["page"],
+            page_size=result["page_size"]
+        )
     except Exception as e:
         return ResponseModel(
             code=StatusCode.SERVER_ERROR.value,

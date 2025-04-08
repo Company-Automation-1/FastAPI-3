@@ -17,6 +17,17 @@ import signal
 import sys
 import time
 from apscheduler.triggers.interval import IntervalTrigger
+from fastapi import applications
+from fastapi.openapi.docs import get_swagger_ui_html
+
+def swagger_monkey_patch(*args, **kwargs):
+    return get_swagger_ui_html(
+        *args, **kwargs,
+        swagger_js_url="https://cdn.staticfile.net/swagger-ui/5.1.0/swagger-ui-bundle.min.js",
+        swagger_css_url="https://cdn.staticfile.net/swagger-ui/5.1.0/swagger-ui.min.css"
+    )
+
+applications.get_swagger_ui_html = swagger_monkey_patch
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)

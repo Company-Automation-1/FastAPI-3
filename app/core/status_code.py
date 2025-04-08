@@ -41,6 +41,9 @@ class StatusCode(Enum):
     
     VALIDATION_ERROR = 422
     
+    UPLOAD_NOT_FOUND = 4001
+    FILE_PROCESS_ERROR = 5001
+    
     @classmethod
     def get_message(cls, code: int) -> str:
         """获取状态码对应的消息"""
@@ -82,6 +85,9 @@ class StatusCode(Enum):
             4003: "ADB设备未找到",
             4004: "ADB权限不足",
             
-            422: "数据验证错误"
+            422: "数据验证错误",
+            
+            StatusCode.UPLOAD_NOT_FOUND: "上传记录不存在",
+            StatusCode.FILE_PROCESS_ERROR: "文件处理失败"
         }
         return messages.get(code, "未知错误") 

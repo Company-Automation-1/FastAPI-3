@@ -7,12 +7,12 @@ from app.db.base_class import Base
 
 # 定义任务状态枚举
 class TaskStatus(str, enum.Enum):
-    UPERR = "uperr"      # 上传失败
-    WT = "wt"           # 待传输
-    WTERR = "wterr"     # 传输失败
-    PENDING = "pending"  # 待执行
-    RES = "res"         # 执行成功
-    REJ = "rej"         # 执行失败
+    UPERR = "UPERR"      # 上传失败
+    WT = "WT"           # 待传输
+    WTERR = "WTERR"     # 传输失败
+    PENDING = "PENDING"  # 待执行
+    RES = "RES"         # 执行成功
+    REJ = "REJ"         # 执行失败
 
 # SQLAlchemy模型
 class Task(Base):

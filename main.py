@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI, Depends
 from app.core.config import settings
-from app.api.v1 import device, upload
+from app.api.v1 import device, upload, task
 from fastapi.middleware.cors import CORSMiddleware
 from app.services.scheduler import TaskScheduler
 from app.services.adb_transfer import ADBTransferService
@@ -92,6 +92,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(device.router, prefix=API_V1_STR)
 app.include_router(upload.router, prefix=API_V1_STR)
+app.include_router(task.router, prefix=API_V1_STR)
 
 @app.on_event("startup")
 async def startup_event():

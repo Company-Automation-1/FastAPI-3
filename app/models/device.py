@@ -1,9 +1,9 @@
 from typing import Optional, List
 from datetime import datetime
-from sqlalchemy import Column, String, BigInteger, Integer
-from pydantic import BaseModel, Field
+from sqlalchemy import Column, String, BigInteger, Integer, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
+from app.schemas.device import DeviceBase, DeviceCreate, DeviceUpdate, DeviceInDB
 
 # SQLAlchemy模型
 class Device(Base):
@@ -17,6 +17,12 @@ class Device(Base):
     password = Column(String(255), nullable=False, comment="设备密码")
     createtime = Column(BigInteger, nullable=True, comment="创建时间")
     updatetime = Column(BigInteger, nullable=True, comment="更新时间")
+
+    # 添加唯一索引
+    __table_args__ = (
+        UniqueConstraint('id', name='pre_devices_id'),
+        UniqueConstraint('device_name', name='pre_devices_name'),
+    )
 
     # 添加与Upload和Task的关系
     uploads = relationship("Upload", back_populates="device", cascade="all, delete-orphan")
@@ -32,31 +38,3 @@ class Device(Base):
             "createtime": self.createtime,
             "updatetime": self.updatetime
         }
-
-# Pydantic模型
-class DeviceBase(BaseModel):
-    """设备基础模型"""
-    device_name: str = Field(..., description="设备名称，唯一标识符")
-    device_id: str = Field(..., description="设备物理ID，如adb设备ID")
-    device_path: str = Field(..., description="设备存储根路径")
-    password: str = Field(..., description="设备密码")
-
-class DeviceCreate(DeviceBase):
-    """创建设备的请求模型"""
-    pass
-
-class DeviceUpdate(BaseModel):
-    """更新设备模型"""
-    device_name: Optional[str] = Field(None, description="设备名称，唯一标识符")
-    device_id: Optional[str] = Field(None, description="设备物理ID，如adb设备ID")
-    device_path: Optional[str] = Field(None, description="设备存储根路径")
-    password: Optional[str] = Field(None, description="设备密码")
-
-class DeviceInDB(DeviceBase):
-    """数据库中的设备模型"""
-    id: int = Field(..., description="设备ID")
-    createtime: Optional[int] = Field(None, description="创建时间")
-    updatetime: Optional[int] = Field(None, description="更新时间")
-
-    class Config:
-        from_attributes = True  # 允许从ORM模型创建

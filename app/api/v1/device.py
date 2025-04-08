@@ -2,8 +2,9 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.models.device import DeviceCreate, DeviceUpdate, DeviceInDB
-from app.models.common import ResponseModel
+from app.schemas.common import ResponseModel
+from app.models.device import Device
+from app.schemas.device import DeviceCreate, DeviceUpdate, DeviceInDB
 from app.services.device import DeviceService
 from app.core.status_code import StatusCode
 

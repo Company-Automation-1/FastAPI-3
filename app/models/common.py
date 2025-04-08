@@ -1,11 +1,4 @@
-from typing import TypeVar, Generic, Optional
-from pydantic import BaseModel
-from app.core.status_code import StatusCode
+from app.schemas.common import ResponseModel
 
-T = TypeVar('T')
-
-class ResponseModel(BaseModel, Generic[T]):
-    """通用响应模型"""
-    code: int = StatusCode.SUCCESS.value
-    message: str = StatusCode.get_message(StatusCode.SUCCESS.value)
-    data: Optional[T] = None 
+# 导出ResponseModel
+__all__ = ['ResponseModel'] 

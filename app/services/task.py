@@ -1,6 +1,7 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from app.models.task import Task, TaskCreate, TaskStatus
+from app.models.task import Task, TaskStatus
+from app.schemas.task import TaskCreate
 import time
 import logging
 

@@ -2,8 +2,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.models.upload import UploadCreate, UploadInDB
-from app.models.common import ResponseModel
+from app.schemas.upload import UploadCreate, UploadInDB
+from app.schemas.common import ResponseModel
 from app.services.upload import UploadService
 from app.core.config import settings
 from app.core.status_code import StatusCode

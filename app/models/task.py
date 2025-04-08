@@ -1,21 +1,22 @@
-from sqlalchemy import Column, Integer, String, BigInteger,ForeignKey
+from typing import Optional
+from datetime import datetime
+import enum
+from sqlalchemy import Column, Integer, String, BigInteger, ForeignKey, Enum, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
-import enum
-from pydantic import BaseModel, Field
-from typing import Optional
 
 # 定义任务状态枚举
 class TaskStatus(str, enum.Enum):
-    UPERR = "UPERR"      # 上传失败
-    WT = "WT"           # 待传输
-    WTERR = "WTERR"     # 传输失败
-    PENDING = "PENDING"  # 待执行
-    RES = "RES"         # 执行成功
-    REJ = "REJ"         # 执行失败
+    UPERR = "uperr"      # 上传失败
+    WT = "wt"           # 待传输
+    WTERR = "wterr"     # 传输失败
+    PENDING = "pending"  # 待执行
+    RES = "res"         # 执行成功
+    REJ = "rej"         # 执行失败
 
 # SQLAlchemy模型
 class Task(Base):
+    """任务数据库模型"""
     __tablename__ = "pre_tasks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="任务ID")
@@ -28,33 +29,28 @@ class Task(Base):
     createtime = Column(BigInteger, nullable=True, comment="创建时间")
     updatetime = Column(BigInteger, nullable=True, comment="更新时间")
 
+    # 添加唯一索引和普通索引
+    __table_args__ = (
+        UniqueConstraint('id', name='pre_tasks_id'),
+        Index('pre_tasks_device', 'device_name'),
+        Index('pre_upload_id', 'upload_id'),
+    )
+
     # 关联关系
     device = relationship("Device", back_populates="tasks")
     upload = relationship("Upload", back_populates="tasks")
 
-    class Config:
-        # 添加索引配置
-        indexes = [
-            ("device_name", "time")  # 复合索引
-        ]
+    def __repr__(self):
+        return f"<Task(id={self.id}, device_name={self.device_name}, status={self.status})>"
 
-# Pydantic模型
-class TaskBase(BaseModel):
-    """任务基础模型"""
-    upload_id: int = Field(..., description="上传记录ID")
-    device_name: str = Field(..., description="设备名称")
-    time: int = Field(..., description="计划执行时间戳")
-    status: Optional[str] = Field(None, description="任务状态")
-
-class TaskCreate(TaskBase):
-    """创建任务的请求模型"""
-    pass
-
-class TaskInDB(TaskBase):
-    """数据库中的任务模型"""
-    id: int = Field(..., description="任务ID")
-    createtime: Optional[int] = Field(None, description="创建时间")
-    updatetime: Optional[int] = Field(None, description="更新时间")
-
-    class Config:
-        from_attributes = True
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "upload_id": self.upload_id,
+            "device_name": self.device_name,
+            "time": self.time,
+            "status": self.status,
+            "createtime": self.createtime,
+            "updatetime": self.updatetime
+        }

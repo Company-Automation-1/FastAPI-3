@@ -3,8 +3,10 @@ import time
 import shutil
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from app.models.upload import Upload, UploadCreate, FileData
-from app.models.task import TaskCreate, TaskStatus
+from app.models.upload import Upload
+from app.schemas.upload import UploadCreate, FileData
+from app.models.task import TaskStatus
+from app.schemas.task import TaskCreate
 from app.services.task import TaskService
 import os
 from base64 import b64decode

@@ -78,11 +78,12 @@ class TaskService:
         try:
             task = db.query(Task).filter(Task.id == task_id).first()
             if task:
+                logger.info(f"更新任务 {task_id} 状态: {task.status} -> {status}")
                 task.status = status
                 task.updatetime = int(time.time())
                 db.commit()
                 db.refresh(task)
-                logger.info(f"任务 {task_id} 状态更新为 {status}")
+                logger.info(f"任务 {task_id} 状态已更新为 {status}")
                 return task
             else:
                 logger.error(f"找不到任务: {task_id}")

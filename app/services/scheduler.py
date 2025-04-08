@@ -8,17 +8,19 @@ import logging
 import asyncio
 from typing import List, Callable, Awaitable
 from contextlib import asynccontextmanager
+import time
 
 logger = logging.getLogger(__name__)
 
 class TaskScheduler:
     def __init__(
         self,
-        task_executor: Callable[[Task, Session], Awaitable[bool]],  # 新增通用任务执行器
+        task_executor: Callable[[Task, Session], Awaitable[bool]],
         check_interval: int = 30,
         max_retries: int = 3,
         retry_delay: int = 2,
-        max_concurrent_tasks: int = 5
+        max_concurrent_tasks: int = 5,
+        task_type: str = "WT"  # 新增：任务类型，默认为WT
     ):
         """
         通用任务调度器
@@ -29,6 +31,7 @@ class TaskScheduler:
             max_retries: 最大重试次数
             retry_delay: 重试延迟（秒）
             max_concurrent_tasks: 最大并发任务数
+            task_type: 任务类型，WT或PENDING
         """
         self.scheduler = AsyncIOScheduler()
         self.task_executor = task_executor
@@ -38,37 +41,50 @@ class TaskScheduler:
         self.max_concurrent_tasks = max_concurrent_tasks
         self.semaphore = asyncio.Semaphore(max_concurrent_tasks)
         self.processing_tasks = set()  # 正在处理的任务ID集合
+        self.task_type = task_type  # 新增：任务类型
 
     async def start(self):
         """启动调度器"""
         self.scheduler.add_job(
-            self.check_waiting_tasks,
+            self.check_tasks,  # 修改：使用统一的检查方法
             trigger=IntervalTrigger(seconds=self.check_interval),
-            id='check_waiting_tasks',
+            id=f'check_{self.task_type}_tasks',
             replace_existing=True
         )
         self.scheduler.start()
-        logger.info("通用任务调度器已启动")
+        logger.info(f"{self.task_type}任务调度器已启动")
 
     async def stop(self):
         """停止调度器"""
         self.scheduler.shutdown()
-        logger.info("通用任务调度器已停止")
+        logger.info(f"{self.task_type}任务调度器已停止")
 
-    async def check_waiting_tasks(self):
-        """检查等待中的任务"""
+    async def check_tasks(self):  # 新增：统一的检查方法
+        """检查任务"""
         try:
             async with self._get_db() as db:
-                # 获取等待中的任务
-                wt_tasks = TaskService.get_tasks_by_status(db, TaskStatus.WT)
-                if not wt_tasks:
+                # 根据任务类型获取任务
+                if self.task_type == "WT":
+                    tasks = TaskService.get_tasks_by_status(db, TaskStatus.WT)
+                else:  # PENDING
+                    tasks = TaskService.get_tasks_by_status(db, TaskStatus.PENDING)
+                    if tasks:
+                        # 获取当前UTC时间戳，并加上8小时偏移量
+                        current_utc_time = time.time() + 8 * 3600
+                        # 过滤出到期的任务
+                        tasks = [
+                            task for task in tasks 
+                            if task.time <= int(current_utc_time) and task.id not in self.processing_tasks
+                        ]
+                
+                if not tasks:
                     return
 
-                logger.info(f"发现 {len(wt_tasks)} 个等待任务")
+                logger.info(f"发现 {len(tasks)} 个{self.task_type}任务")
                 
                 # 过滤掉正在处理的任务
                 new_tasks = [
-                    task for task in wt_tasks 
+                    task for task in tasks 
                     if task.id not in self.processing_tasks
                 ]
                 
@@ -85,7 +101,7 @@ class TaskScheduler:
                 asyncio.create_task(self.process_tasks(tasks))
                 
         except Exception as e:
-            logger.error(f"检查等待任务时出错: {str(e)}")
+            logger.error(f"检查{self.task_type}任务时出错: {str(e)}")
 
     async def process_tasks(self, tasks: List[asyncio.Task]):
         """并发处理多个任务"""
@@ -99,26 +115,51 @@ class TaskScheduler:
         # 使用信号量控制并发
         async with self.semaphore:
             try:
+                task_id = task.id  # 保存任务ID
                 # 标记任务为处理中
-                self.processing_tasks.add(task.id)
+                self.processing_tasks.add(task_id)
+                
+                # 重新从数据库加载任务，确保关联关系可用
+                fresh_task = db.query(Task).filter(Task.id == task_id).first()
+                if not fresh_task:
+                    logger.error(f"任务 {task_id} 不存在")
+                    return False
                 
                 # 处理任务
-                success = await self.process_task(task, db)
+                success = await self.process_task(fresh_task, db)
                 
                 # 更新任务状态
                 if success:
-                    logger.info(f"任务 {task.id} 处理成功")
-                    TaskService.update_task_status(db, task.id, TaskStatus.PENDING)
+                    logger.info(f"任务 {task_id} 处理成功")
+                    # 根据任务类型更新状态
+                    if self.task_type == "PENDING":
+                        # UI自动化任务成功 -> RES
+                        TaskService.update_task_status(db, task_id, TaskStatus.RES)
+                    else:
+                        # 文件传输任务成功 -> PENDING
+                        TaskService.update_task_status(db, task_id, TaskStatus.PENDING)
                 else:
-                    logger.error(f"任务 {task.id} 处理失败")
-                    TaskService.update_task_status(db, task.id, TaskStatus.WTERR)
+                    logger.error(f"任务 {task_id} 处理失败")
+                    # 根据任务类型更新状态
+                    if self.task_type == "PENDING":
+                        # UI自动化任务失败 -> REJ
+                        TaskService.update_task_status(db, task_id, TaskStatus.REJ)
+                    else:
+                        # 文件传输任务失败 -> WTERR
+                        TaskService.update_task_status(db, task_id, TaskStatus.WTERR)
                     
             except Exception as e:
-                logger.error(f"处理任务 {task.id} 时出错: {str(e)}")
-                TaskService.update_task_status(db, task.id, TaskStatus.WTERR)
+                logger.error(f"处理任务 {task_id} 时出错: {str(e)}")
+                # 根据任务类型更新状态
+                if self.task_type == "PENDING":
+                    # UI自动化任务异常 -> REJ
+                    TaskService.update_task_status(db, task_id, TaskStatus.REJ)
+                else:
+                    # 文件传输任务异常 -> WTERR
+                    TaskService.update_task_status(db, task_id, TaskStatus.WTERR)
             finally:
                 # 移除处理中标记
-                self.processing_tasks.remove(task.id)
+                self.processing_tasks.remove(task_id)
 
     async def process_task(self, task: Task, db: Session) -> bool:
         """任务处理的核心逻辑"""

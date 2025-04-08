@@ -42,13 +42,21 @@ class UploadService:
                 # 生成临时文件路径
                 temp_file_path = os.path.join(temp_dir, file.filename)
                 
-                # 保存文件到临时目录
-                file_data = b64decode(file.data)
-                with open(temp_file_path, 'wb') as f:
-                    f.write(file_data)
-                
-                # 收集最终的相对路径（不是临时路径）
-                saved_files.append(os.path.join(upload_data.device_name, file.filename))
+                try:
+                    # 保存文件到临时目录
+                    file_data = b64decode(file.data)
+                    with open(temp_file_path, 'wb') as f:
+                        f.write(file_data)
+                    
+                    # 显式调用垃圾回收以确保文件句柄释放
+                    import gc
+                    gc.collect()
+                    
+                    # 收集最终的相对路径（不是临时路径）
+                    saved_files.append(os.path.join(upload_data.device_name, file.filename))
+                except Exception as e:
+                    print(f"写入临时文件失败: {str(e)}")
+                    raise e
 
             current_time = int(time.time())
             
@@ -101,7 +109,13 @@ class UploadService:
             for file in upload_data.files:
                 temp_file_path = os.path.join(temp_dir, file.filename)
                 final_file_path = os.path.join(final_dir, file.filename)
-                shutil.move(temp_file_path, final_file_path)
+                
+                try:
+                    # 复制而不是移动，以减少文件锁定问题
+                    shutil.copy2(temp_file_path, final_file_path)
+                except Exception as e:
+                    print(f"复制文件失败 {temp_file_path} -> {final_file_path}: {str(e)}")
+                    raise e
 
             # 提交事务
             db.commit()
@@ -134,8 +148,7 @@ class UploadService:
             raise e
         finally:
             # 清理临时目录
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
+            safe_remove_directory(temp_dir)
 
     @staticmethod
     def get_uploads_by_device(db: Session, device_name: str, skip: int = 0, limit: int = 100) -> List[Upload]:
@@ -146,3 +159,22 @@ class UploadService:
             .offset(skip)\
             .limit(limit)\
             .all()
+
+def safe_remove_directory(dir_path, max_retries=3, retry_delay=1):
+    """安全删除目录，包含重试机制"""
+    import time
+    
+    for attempt in range(max_retries):
+        try:
+            if os.path.exists(dir_path):
+                shutil.rmtree(dir_path)
+            return True
+        except PermissionError as e:
+            if attempt < max_retries - 1:
+                # 强制垃圾回收
+                import gc
+                gc.collect()
+                time.sleep(retry_delay)
+            else:
+                print(f"无法删除目录 {dir_path}，最大重试次数已达: {str(e)}")
+                return False

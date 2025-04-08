@@ -181,13 +181,13 @@ class ADBTransferService:
                     "shell", f"input text {device.password}"
                 ])
                 
-                # 按回车确认
-                print("按回车确认密码...")
-                self.adb_service.connection._execute_command([
-                    self.adb_service.connection.adb_path,
-                    "-s", device.device_id,
-                    "shell", "input keyevent 66"  # KEYCODE_ENTER
-                ])
+                # # 按回车确认
+                # print("按回车确认密码...")
+                # self.adb_service.connection._execute_command([
+                #     self.adb_service.connection.adb_path,
+                #     "-s", device.device_id,
+                #     "shell", "input keyevent 66"  # KEYCODE_ENTER
+                # ])
             
             # 4. 等待解锁动作完成
             print("等待解锁动作完成...")
@@ -197,13 +197,15 @@ class ADBTransferService:
             lock_status = await self.check_device_lock_status(device, db)
             if lock_status is False:
                 print("设备已成功解锁")
+
+                await asyncio.sleep(0.5)  # 短暂等待
                 
-                # 解锁成功后，清除所有后台应用
-                print("清除所有后台应用...")
+                # 解锁成功后，返回桌面而不是杀死后台应用
+                print("返回桌面...")
                 self.adb_service.connection._execute_command([
                     self.adb_service.connection.adb_path,
                     "-s", device.device_id,
-                    "shell", "am kill-all"  # 杀死所有后台应用
+                    "shell", "input keyevent 3"  # KEYCODE_HOME
                 ])
                 await asyncio.sleep(0.5)  # 短暂等待
                 
@@ -399,13 +401,24 @@ class ADBTransferService:
             print(f"  本地路径: {local_path}")
             print(f"  目标路径: {remote_path}")
             
+            # 检查文件是否可访问
+            if not os.path.exists(local_path):
+                print(f"本地文件不存在: {local_path}")
+                return False
+            
+            # 检查文件是否可访问
+            try:
+                with open(local_path, 'rb') as f:
+                    # 只读取一小部分以验证文件可访问
+                    f.read(1)
+            except IOError as e:
+                print(f"文件无法访问: {local_path}, 错误: {str(e)}")
+                return False
+            
             # 创建目标目录
             remote_dir = os.path.dirname(remote_path)
-            self.adb_service.connection._execute_command([
-                self.adb_service.connection.adb_path,
-                "-s", device.device_id,
-                "shell", f"mkdir -p {remote_dir}"
-            ])
+            # 处理路径中的空格问题
+            remote_dir = remote_dir.strip()
             
             # 推送文件
             try:
@@ -458,14 +471,78 @@ class ADBTransferService:
         
         total_files = len(local_files)
         successful_transfers = 0
+        failed_transfers = []
         
         print(f"\n开始传输 {total_files} 个文件到设备 {device.device_name}...")
         
+        # 首次尝试传输所有文件
         for i, (local_path, remote_path) in enumerate(zip(local_files, remote_files)):
             print(f"\n[{i+1}/{total_files}] 传输文件...")
-            success = await self.transfer_file(device, local_path, remote_path)
-            if success:
-                successful_transfers += 1
+            
+            # 每个文件允许重试3次
+            max_retries = 3
+            for retry in range(max_retries):
+                # 检查设备连接状态
+                if retry > 0:
+                    device_connected = await self.check_device_connection(device)
+                    if not device_connected:
+                        print(f"设备断开连接，无法继续重试")
+                        break
+                    
+                # 添加延迟以允许系统释放文件资源
+                if retry > 0:
+                    await asyncio.sleep(2)
+                    print(f"  重试 #{retry+1}...")
+                
+                success = await self.transfer_file(device, local_path, remote_path)
+                if success:
+                    successful_transfers += 1
+                    break
+                elif retry == max_retries - 1:
+                    print(f"  文件传输失败，已达最大重试次数")
+                    failed_transfers.append((local_path, remote_path))
         
         print(f"\n文件传输完成: {successful_transfers}/{total_files} 成功")
+        
+        # 无论成功与否，都执行媒体扫描广播
+        try:
+            print("\n发送媒体扫描广播...")
+            self.adb_service.connection._execute_command([
+                self.adb_service.connection.adb_path,
+                "-s", device.device_id,
+                "shell", "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures"
+            ])
+            print("媒体扫描请求已发送")
+        except Exception as e:
+            print(f"发送媒体扫描广播失败: {str(e)}")
+        
+        # 短暂等待，再次返回桌面，然后熄屏
+        try:
+            # 短暂等待媒体扫描完成
+            print("\n短暂等待媒体扫描完成...")
+            await asyncio.sleep(2)
+            
+            # 再次返回桌面
+            print("再次返回桌面...")
+            self.adb_service.connection._execute_command([
+                self.adb_service.connection.adb_path,
+                "-s", device.device_id,
+                "shell", "input keyevent 3"  # KEYCODE_HOME
+            ])
+            
+            # 短暂等待返回桌面操作完成
+            await asyncio.sleep(1)
+            
+            # 熄灭屏幕
+            print("熄灭屏幕...")
+            self.adb_service.connection._execute_command([
+                self.adb_service.connection.adb_path,
+                "-s", device.device_id,
+                "shell", "input keyevent 26"  # KEYCODE_POWER
+            ])
+            print("屏幕已熄灭")
+        except Exception as e:
+            print(f"执行返回桌面和熄屏操作时出错: {str(e)}")
+        
+        # 不允许部分成功算作任务成功
         return successful_transfers == total_files

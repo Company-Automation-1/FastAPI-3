@@ -1,15 +1,26 @@
 # main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from app.core.config import settings
 from app.api.v1 import device, upload
 from fastapi.middleware.cors import CORSMiddleware
 from app.services.scheduler import TaskScheduler
 from app.services.adb_transfer import ADBTransferService
-# import asyncio
-# from app.core.logger import setup_logger
-# import logging
-# from app.db.session import engine
-# from sqlalchemy import text
+from app.models.task import TaskStatus
+from app.services.automation_service import AutomationService
+from app.db.session import engine, SessionLocal, close_db_connection
+from app.db.base_class import Base
+from app.services.task import TaskService
+from app.services.app_lifecycle import AppLifecycle
+import logging
+import asyncio
+import signal
+import sys
+import time
+from apscheduler.triggers.interval import IntervalTrigger
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 项目基本配置
 PROJECT_NAME: str = "FastAPI Device Manager"
@@ -62,18 +73,14 @@ API_DESCRIPTION = """
 - 4003: ADB设备未找到
 - 4004: ADB权限不足
 """
-    
+
 app = FastAPI(
-    version="1.0.0",
     title=PROJECT_NAME,
     openapi_url=f"{API_V1_STR}/openapi.json",
-    docs_url=f"{API_V1_STR}/docs",
-    redoc_url=f"{API_V1_STR}/redoc",
-    # description="FastAPI Device Manager API"
     description=API_DESCRIPTION
 )
 
-# 配置CORS
+# 添加CORS中间件
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 在生产环境中应该设置具体的域名
@@ -86,56 +93,75 @@ app.add_middleware(
 app.include_router(device.router, prefix=API_V1_STR)
 app.include_router(upload.router, prefix=API_V1_STR)
 
-# 全局服务实例
-adb_transfer_service = None
-task_scheduler = None
-
 @app.on_event("startup")
 async def startup_event():
-    """服务启动时初始化"""
-    global adb_transfer_service, task_scheduler
-    
-#     # 初始化日志
-#     setup_logger()
-    
-#     # 测试数据库连接
-#     try:
-#         with engine.connect() as conn:
-#             conn.execute(text("SELECT 1"))
-#         logging.info("数据库连接成功")
-#     except Exception as e:
-#         logging.error(f"数据库连接失败: {str(e)}")
-#         raise
-    
-    # 初始化ADB传输服务
-    adb_transfer_service = ADBTransferService()
-    
-    # 初始化任务调度器 - 使用ADBTransferService的execute_transfer方法作为任务执行器
-    task_scheduler = TaskScheduler(
-        task_executor=adb_transfer_service.execute_transfer,
-        check_interval=30,
-        max_retries=3,
-        retry_delay=2,
-        max_concurrent_tasks=5
-    )
-    await task_scheduler.start()
-    
-#     logging.info("所有服务已启动")
+    """应用启动时的初始化操作"""
+    try:
+        # 初始化ADB传输服务
+        adb_service = ADBTransferService()
+        
+        # 初始化自动化服务
+        automation_service = AutomationService()
+        
+        # 创建任务调度器
+        task_scheduler = TaskScheduler(
+            task_executor=adb_service.execute_transfer,
+            check_interval=30,
+            max_retries=3,
+            retry_delay=2,
+            task_type="WT"  # 文件传输任务
+        )
+        
+        # 创建UI调度器
+        ui_scheduler = TaskScheduler(
+            task_executor=automation_service.execute_pending_task,
+            check_interval=30,
+            max_retries=3,
+            retry_delay=2,
+            task_type="PENDING"  # UI自动化任务
+        )
+        
+        # 启动调度器
+        await task_scheduler.start()
+        await ui_scheduler.start()
+        
+        # 创建应用生命周期管理器
+        global app_lifecycle
+        app_lifecycle = AppLifecycle(
+            task_scheduler=task_scheduler,
+            ui_scheduler=ui_scheduler,
+            adb_transfer_service=adb_service
+        )
+        
+        logger.info("所有任务调度器已启动")
+        
+    except Exception as e:
+        logger.error(f"应用启动失败: {str(e)}")
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """服务关闭时清理"""
-    global task_scheduler
-    if task_scheduler:
-        await task_scheduler.stop()
-    # logging.info("所有服务已停止")
-    print("所有服务已停止")
+    """应用关闭时的清理操作"""
+    try:
+        # 关闭调度器
+        if app_lifecycle.task_scheduler:
+            await app_lifecycle.task_scheduler.stop()
+        if app_lifecycle.ui_scheduler:
+            await app_lifecycle.ui_scheduler.stop()
+            
+        # 关闭数据库连接池
+        close_db_connection()
+        
+        logger.info("应用已安全关闭")
+        
+    except Exception as e:
+        logger.error(f"应用关闭时出错: {str(e)}")
 
-@app.get("/")
-async def root():
-    return {"message": "欢迎使用 FastAPI Device Manager"}
+def signal_handler(signum, frame):
+    """处理系统信号"""
+    logger.info("收到关闭信号，正在关闭应用...")
+    sys.exit(0)
 
-# 启动服务器（仅在直接运行时）
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# 注册信号处理器
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)

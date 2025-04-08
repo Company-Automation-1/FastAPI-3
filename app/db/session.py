@@ -21,4 +21,8 @@ def get_db():
     try:
         yield db
     finally:
-        db.close() 
+        db.close()
+
+def close_db_connection():
+    """关闭数据库连接池"""
+    engine.dispose() 

@@ -3,14 +3,25 @@ from fastapi import FastAPI, Depends
 from app.core.config import settings
 from app.api.v1 import device, upload, task
 from fastapi.middleware.cors import CORSMiddleware
-from app.services.scheduler import TaskScheduler
-from app.services.adb_transfer import ADBTransferService
 from app.models.task import TaskStatus
-from app.services.automation_service import AutomationService
 from app.db.session import engine, SessionLocal, close_db_connection
 from app.db.base_class import Base
 from app.services.task import TaskService
+
+# 导入新架构组件
+from app.services.task_scanner import TaskScanner
+from app.services.task_dispatcher import TaskDispatcher
+from app.services.wt_task_scheduler import WTTaskScheduler
+from app.services.pending_task_scheduler import PendingTaskScheduler
+from app.services.task_executor import TaskExecutor
+from app.services.task_status_manager import TaskStatusManager
+from app.services.task_data_provider import TaskDataProvider
+from app.services.device_operation_service import DeviceOperationService
+from app.services.adb_transfer import ADBTransferService
+from app.services.automation_service import AutomationService
 from app.services.app_lifecycle import AppLifecycle
+from app.adb.service import ADBService
+
 # from app.services.garbage_cleanup import GarbageCleanupService
 import logging
 import asyncio
@@ -110,48 +121,86 @@ app.include_router(task.router, prefix=API_V1_STR)
 async def startup_event():
     """应用启动时的初始化操作"""
     try:
-        # 初始化ADB传输服务
-        adb_service = ADBTransferService()
+        # 1. 初始化基础设施服务
+        # 初始化ADB服务（共享实例）
+        adb_service = ADBService()
         
-        # 初始化自动化服务
-        automation_service = AutomationService()
+        # 初始化设备操作服务（设备连接和解锁的通用功能）
+        device_operation_service = DeviceOperationService(adb_service=adb_service)
         
-        # 创建任务调度器
-        task_scheduler = TaskScheduler(
-            task_executor=adb_service.execute_transfer,
-            check_interval=30,
-            max_retries=3,
-            retry_delay=2,
-            task_type="WT"  # 文件传输任务
+        # 2. 初始化业务服务
+        # 初始化ADB传输服务（负责文件传输）
+        adb_transfer_service = ADBTransferService(
+            adb_service=adb_service,
+            device_operation=device_operation_service
         )
         
-        # 创建UI调度器
-        ui_scheduler = TaskScheduler(
-            task_executor=automation_service.execute_pending_task,
-            check_interval=30,
-            max_retries=3,
-            retry_delay=2,
-            task_type="PENDING"  # UI自动化任务
+        # 初始化自动化服务（负责UI自动化）
+        automation_service = AutomationService(
+            device_operation=device_operation_service
         )
         
-        # 创建垃圾清理服务
+        # 3. 初始化数据和状态管理服务
+        # 初始化任务状态管理器（连接执行层和服务层）
+        status_transition_callback = TaskStatusManager.get_status_transition_callback()
+        
+        # 4. 初始化任务执行器
+        task_executor = TaskExecutor(
+            adb_service=adb_transfer_service,
+            automation_service=automation_service,
+            status_update_callback=status_transition_callback,
+            max_retries=3,
+            retry_delay=2
+        )
+        
+        # 5. 初始化任务调度服务
+        # 初始化任务分发器
+        task_dispatcher = TaskDispatcher()
+        
+        # WT任务调度器 - 采用设备串行+任务并行的方式
+        wt_scheduler = WTTaskScheduler(
+            executor=task_executor,
+            max_concurrent_devices=5
+        )
+        
+        # PENDING任务调度器 - 采用设备串行+多线程的方式
+        pending_scheduler = PendingTaskScheduler(
+            executor=task_executor,
+            max_workers=5
+        )
+        
+        # 在分发器中注册调度器
+        task_dispatcher.register_scheduler(TaskStatus.WT, wt_scheduler)
+        task_dispatcher.register_scheduler(TaskStatus.PENDING, pending_scheduler)
+        
+        # 6. 初始化任务扫描器
+        task_scanner = TaskScanner(
+            dispatcher=task_dispatcher,
+            check_interval=30
+        )
+        
+        # 7. 创建垃圾清理服务
         # garbage_cleanup = GarbageCleanupService()
         
-        # 启动调度器
-        await task_scheduler.start()
-        await ui_scheduler.start()
+        # 8. 启动任务扫描器
+        await task_scanner.start()
         # await garbage_cleanup.start()
         
-        # 创建应用生命周期管理器
+        # 9. 创建应用生命周期管理器
         global app_lifecycle
         app_lifecycle = AppLifecycle(
-            task_scheduler=task_scheduler,
-            ui_scheduler=ui_scheduler,
-            adb_transfer_service=adb_service,
+            task_scanner=task_scanner,
+            task_dispatcher=task_dispatcher,
+            wt_scheduler=wt_scheduler,
+            pending_scheduler=pending_scheduler,
+            task_executor=task_executor,
+            adb_service=adb_transfer_service,
+            automation_service=automation_service,
+            device_operation_service=device_operation_service,
             # garbage_cleanup=garbage_cleanup
         )
         
-        logger.info("所有任务调度器已启动")
+        logger.info("任务系统启动成功")
         
     except Exception as e:
         logger.error(f"应用启动失败: {str(e)}")
@@ -161,14 +210,9 @@ async def startup_event():
 async def shutdown_event():
     """应用关闭时的清理操作"""
     try:
-        # 关闭调度器
-        if app_lifecycle.task_scheduler:
-            await app_lifecycle.task_scheduler.stop()
-        if app_lifecycle.ui_scheduler:
-            await app_lifecycle.ui_scheduler.stop()
-        # if app_lifecycle.garbage_cleanup:
-        #     await app_lifecycle.garbage_cleanup.stop()
-            
+        # 关闭所有组件
+        await app_lifecycle.shutdown()
+        
         # 关闭数据库连接池
         close_db_connection()
         

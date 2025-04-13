@@ -68,11 +68,16 @@ def get_current_timestamp() -> int:
     # 转换回时间戳，这样就会考虑时区设置
     return datetime_to_timestamp(local_datetime)
 
-def get_current_datetime() -> str:
+def get_current_datetime(timestamp=None) -> str:
     """
-    获取当前时间的格式化字符串，考虑时区设置
+    获取指定时间戳或当前时间的格式化字符串，考虑时区设置
+    
+    Args:
+        timestamp: 可选时间戳（秒），如果未提供则使用当前时间
     
     Returns:
-        str: yyyymmddhhmmss格式的当前时间字符串
+        str: yyyymmddhhmmss格式的时间字符串
     """
-    return timestamp_to_datetime(int(time.time()))
+    if timestamp is None:
+        timestamp = int(time.time())
+    return timestamp_to_datetime(int(timestamp))

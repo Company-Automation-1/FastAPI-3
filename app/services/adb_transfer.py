@@ -152,16 +152,36 @@ class ADBTransferService:
         try:
             print(f"正在尝试解锁设备 {device.device_name}({device.device_id})...")
             
-            # 1. 检查屏幕状态，如果熄灭则先唤醒
-            screen_status = await self.check_screen_status(device)
-            if screen_status != "ON":
-                print("屏幕未点亮，先唤醒屏幕...")
-                wake_success = await self.wake_screen(device)
-                if not wake_success:
-                    print("屏幕唤醒失败，无法继续解锁")
-                    return False
+            # 1. 检查锁屏状态
+            lock_status = await self.check_device_lock_status(device, db)
+            if lock_status is True:
+                print("设备已锁屏，直接执行解锁操作...")
+            else:
+                print("设备未锁屏，先返回桌面并锁屏...")
+                # 返回桌面
+                self.adb_service.connection._execute_command([
+                    self.adb_service.connection.adb_path,
+                    "-s", device.device_id,
+                    "shell", "input keyevent 3"  # KEYCODE_HOME
+                ])
+                await asyncio.sleep(0.5)
+                
+                # 锁屏
+                self.adb_service.connection._execute_command([
+                    self.adb_service.connection.adb_path,
+                    "-s", device.device_id,
+                    "shell", "input keyevent 26"  # KEYCODE_POWER
+                ])
+                await asyncio.sleep(1)
             
-            # 2. 执行解锁滑动操作
+            # 2. 唤醒屏幕
+            print("唤醒屏幕...")
+            wake_success = await self.wake_screen(device)
+            if not wake_success:
+                print("屏幕唤醒失败，无法继续解锁")
+                return False
+            
+            # 3. 执行解锁滑动操作
             print("执行滑动解锁操作...")
             self.adb_service.connection._execute_command([
                 self.adb_service.connection.adb_path,
@@ -172,7 +192,7 @@ class ADBTransferService:
             # 等待滑动动画完成
             await asyncio.sleep(0.5)
             
-            # 3. 如果设置了密码，则输入密码
+            # 4. 如果设置了密码，则输入密码
             if device.password:
                 print(f"输入密码: {device.password}...")
                 self.adb_service.connection._execute_command([
@@ -180,42 +200,12 @@ class ADBTransferService:
                     "-s", device.device_id,
                     "shell", f"input text {device.password}"
                 ])
-                
-                # # 按回车确认
-                # print("按回车确认密码...")
-                # self.adb_service.connection._execute_command([
-                #     self.adb_service.connection.adb_path,
-                #     "-s", device.device_id,
-                #     "shell", "input keyevent 66"  # KEYCODE_ENTER
-                # ])
             
-            # 4. 等待解锁动作完成
+            # 5. 等待解锁动作完成
             print("等待解锁动作完成...")
             await asyncio.sleep(1)
             
-            # 5. 验证是否解锁成功
-            lock_status = await self.check_device_lock_status(device, db)
-            if lock_status is False:
-                print("设备已成功解锁")
-
-                await asyncio.sleep(0.5)  # 短暂等待
-                
-                # 解锁成功后，返回桌面而不是杀死后台应用
-                print("返回桌面...")
-                self.adb_service.connection._execute_command([
-                    self.adb_service.connection.adb_path,
-                    "-s", device.device_id,
-                    "shell", "input keyevent 3"  # KEYCODE_HOME
-                ])
-                await asyncio.sleep(0.5)  # 短暂等待
-                
-                return True
-            elif lock_status is True:
-                print("解锁失败，设备仍处于锁屏状态")
-                return False
-            else:
-                print("无法确认解锁状态")
-                return False
+            return True
         
         except Exception as e:
             print(f"解锁屏幕失败: {str(e)}")
@@ -281,28 +271,11 @@ class ADBTransferService:
             
             # 解锁设备
             if hasattr(self, 'adb_service') and self.adb_service:
-                # 检查屏幕和锁屏状态
-                screen_status = await self.check_screen_status(device)
-                print(f"\n设备屏幕状态: {screen_status}")
-                
-                lock_status = await self.check_device_lock_status(device, db)
-                if lock_status is True:
-                    print("设备锁屏状态: 已锁屏")
-                elif lock_status is False:
-                    print("设备锁屏状态: 未锁屏")
-                else:
-                    print("设备锁屏状态: 检查失败，无法确定")
-                
-                # 如果需要解锁
-                if screen_status != "ON" or lock_status is True:
-                    print("\n=== 设备需要解锁，开始执行解锁操作 ===")
-                    unlock_success = await self.unlock_screen(device, db)
-                    if not unlock_success:
-                        print("\n=== 设备解锁失败，无法继续传输文件 ===")
-                        return False
-                    print("\n=== 设备解锁成功 ===")
-                else:
-                    print("\n设备已解锁，无需操作")
+                unlock_success = await self.unlock_screen(device, db)
+                if not unlock_success:
+                    print("\n=== 设备解锁失败，无法继续传输文件 ===")
+                    return False
+                print("\n=== 设备解锁成功 ===")
             
             # 准备传输文件
             try:
@@ -339,23 +312,6 @@ class ADBTransferService:
                     print("\n=== 所有文件传输成功 ===")
                     return True
                 else:
-                    # 即使传输过程报告失败，再次检查文件是否存在
-                    print("\n=== 传输过程报告失败，执行最终验证 ===")
-                    
-                    # 随机选择一个文件进行验证
-                    if len(device_file_paths) > 0:
-                        sample_file = device_file_paths[0]
-                        verify_result = self.adb_service.connection._execute_command([
-                            self.adb_service.connection.adb_path,
-                            "-s", device.device_id,
-                            "shell", f"ls -la {sample_file}"
-                        ])
-                        
-                        if "No such file or directory" not in verify_result:
-                            print(f"最终验证发现文件已成功传输！")
-                            print(f"尽管传输命令没有返回成功信息，但文件确实已存在于设备上")
-                            return True
-                    
                     print("\n=== 文件传输失败 ===")
                     return False
                 
@@ -402,16 +358,11 @@ class ADBTransferService:
             print(f"  目标路径: {remote_path}")
             
             # 检查文件是否可访问
-            if not os.path.exists(local_path):
-                print(f"本地文件不存在: {local_path}")
-                return False
-            
-            # 检查文件是否可访问
             try:
                 with open(local_path, 'rb') as f:
                     # 只读取一小部分以验证文件可访问
                     f.read(1)
-            except IOError as e:
+            except (IOError, FileNotFoundError) as e:
                 print(f"文件无法访问: {local_path}, 错误: {str(e)}")
                 return False
             
@@ -430,7 +381,7 @@ class ADBTransferService:
                 
                 print(f"文件传输结果: {push_result if push_result else '无输出'}")
                 
-                # 即使没有返回成功信息，也验证文件是否存在
+                # 验证文件是否存在
                 verify_result = self.adb_service.connection._execute_command([
                     self.adb_service.connection.adb_path,
                     "-s", device.device_id,
@@ -471,40 +422,36 @@ class ADBTransferService:
         
         total_files = len(local_files)
         successful_transfers = 0
-        failed_transfers = []
         
         print(f"\n开始传输 {total_files} 个文件到设备 {device.device_name}...")
         
-        # 首次尝试传输所有文件
+        # 检查设备连接状态
+        device_connected = await self.check_device_connection(device)
+        if not device_connected:
+            print("设备未连接，无法传输文件")
+            return False
+        
+        # 传输所有文件
         for i, (local_path, remote_path) in enumerate(zip(local_files, remote_files)):
             print(f"\n[{i+1}/{total_files}] 传输文件...")
             
             # 每个文件允许重试3次
-            max_retries = 3
-            for retry in range(max_retries):
-                # 检查设备连接状态
+            for retry in range(3):
                 if retry > 0:
-                    device_connected = await self.check_device_connection(device)
-                    if not device_connected:
-                        print(f"设备断开连接，无法继续重试")
-                        break
-                    
-                # 添加延迟以允许系统释放文件资源
-                if retry > 0:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(2)  # 重试前等待
                     print(f"  重试 #{retry+1}...")
                 
                 success = await self.transfer_file(device, local_path, remote_path)
                 if success:
                     successful_transfers += 1
                     break
-                elif retry == max_retries - 1:
+                elif retry == 2:  # 最后一次重试失败
                     print(f"  文件传输失败，已达最大重试次数")
-                    failed_transfers.append((local_path, remote_path))
+                    return False
         
         print(f"\n文件传输完成: {successful_transfers}/{total_files} 成功")
         
-        # 无论成功与否，都执行媒体扫描广播
+        # 发送媒体扫描广播
         try:
             print("\n发送媒体扫描广播...")
             self.adb_service.connection._execute_command([
@@ -516,33 +463,4 @@ class ADBTransferService:
         except Exception as e:
             print(f"发送媒体扫描广播失败: {str(e)}")
         
-        # 短暂等待，再次返回桌面，然后熄屏
-        try:
-            # 短暂等待媒体扫描完成
-            print("\n短暂等待媒体扫描完成...")
-            await asyncio.sleep(2)
-            
-            # 再次返回桌面
-            print("再次返回桌面...")
-            self.adb_service.connection._execute_command([
-                self.adb_service.connection.adb_path,
-                "-s", device.device_id,
-                "shell", "input keyevent 3"  # KEYCODE_HOME
-            ])
-            
-            # 短暂等待返回桌面操作完成
-            await asyncio.sleep(1)
-            
-            # 熄灭屏幕
-            print("熄灭屏幕...")
-            self.adb_service.connection._execute_command([
-                self.adb_service.connection.adb_path,
-                "-s", device.device_id,
-                "shell", "input keyevent 26"  # KEYCODE_POWER
-            ])
-            print("屏幕已熄灭")
-        except Exception as e:
-            print(f"执行返回桌面和熄屏操作时出错: {str(e)}")
-        
-        # 不允许部分成功算作任务成功
         return successful_transfers == total_files

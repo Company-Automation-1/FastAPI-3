@@ -8,8 +8,26 @@ from app.models.task import Task, TaskStatus
 from typing import Dict, Callable, List, Any
 from contextlib import asynccontextmanager
 from app.utils.time_utils import get_current_timestamp
+import traceback
+import re
 
 logger = logging.getLogger(__name__)
+
+# 定义已知任务扫描错误模式
+KNOWN_SCANNER_ERROR_PATTERNS = [
+    # 数据库连接错误
+    r"Can't connect to MySQL server",
+    r"Connection refused",
+    r"Lost connection to MySQL server",
+    # SQLAlchemy错误
+    r"SQLAlchemy error",
+    r"Database is not available",
+    # 任务调度错误
+    r"Task .+ already exists",
+    r"No scheduler found for status",
+    # 时间格式错误
+    r"time data .+ does not match format"
+]
 
 class TaskScanner:
     """任务扫描器 - 只负责定期扫描数据库中的任务，然后将任务分发给任务分发器"""
@@ -81,7 +99,24 @@ class TaskScanner:
                         self.dispatcher.dispatch_task(task, TaskStatus.PENDING)
                 
         except Exception as e:
-            self._logger.error(f"扫描任务时出错: {str(e)}")
+            # 判断是否为已知错误
+            error_message = str(e)
+            is_known_error = False
+            
+            # 检查是否为已知的数据库连接错误或其他常见错误
+            for pattern in KNOWN_SCANNER_ERROR_PATTERNS:
+                if re.search(pattern, error_message):
+                    is_known_error = True
+                    break
+            
+            # 记录错误信息
+            if is_known_error:
+                # 已知错误 - 只记录简要信息
+                self._logger.error(f"扫描任务时出错: {error_message.split('(Background')[0]}")  # 移除背景信息链接
+            else:
+                # 未知错误 - 记录完整堆栈
+                self._logger.error(f"扫描任务时出错: {error_message}")
+                self._logger.error(traceback.format_exc())
     
     def _get_tasks_by_status(self, db: Session, status: str) -> List[Task]:
         """获取指定状态的任务"""

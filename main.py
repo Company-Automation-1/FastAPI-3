@@ -31,6 +31,8 @@ import time
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import applications
 from fastapi.openapi.docs import get_swagger_ui_html
+from app.core.logger import setup_logger
+from app.api.api_logging import setup_api_logging
 
 def swagger_monkey_patch(*args, **kwargs):
     return get_swagger_ui_html(
@@ -42,7 +44,7 @@ def swagger_monkey_patch(*args, **kwargs):
 applications.get_swagger_ui_html = swagger_monkey_patch
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
+setup_logger(logging.INFO)  # 使用增强的日志配置
 logger = logging.getLogger(__name__)
 
 # 项目基本配置
@@ -111,6 +113,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 应用API日志中间件
+setup_api_logging(app)
 
 # 注册路由
 app.include_router(device.router, prefix=API_V1_STR)

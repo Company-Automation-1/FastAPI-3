@@ -1,0 +1,25 @@
+# 基础依赖
+fastapi>=0.78.0
+uvicorn>=0.17.6
+pydantic>=1.9.0
+sqlalchemy>=1.4.0
+passlib>=1.7.4
+python-jose>=3.3.0
+python-multipart>=0.0.5
+aiofiles>=0.8.0
+alembic>=1.7.7
+pytz>=2022.1
+cryptography>=37.0.2
+pytest>=7.0.0
+pytest-asyncio>=0.18.0
+pytest-cov>=3.0.0
+httpx>=0.22.0
+pytest-mock>=3.7.0
+
+# 系统监控与日志
+psutil>=5.9.0
+apscheduler>=3.9.1
+python-dateutil>=2.8.2
+
+# ADB相关依赖
+# 如果项目直接使用subprocess调用ADB，则不需要额外的库 

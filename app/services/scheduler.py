@@ -1,6 +1,6 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.db.session import SessionLocal
 from app.models.task import Task, TaskStatus
 from app.services.task import TaskService
@@ -10,6 +10,11 @@ from typing import List, Callable, Awaitable, Optional
 from contextlib import asynccontextmanager
 import time
 import concurrent.futures
+from app.models.device import Device
+from weakref import WeakValueDictionary, WeakSet
+import datetime
+from app.utils.time_utils import get_current_timestamp, get_current_datetime
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +26,7 @@ class TaskScheduler:
         max_retries: int = 3,
         retry_delay: int = 2,
         max_concurrent_tasks: int = 5,
-        task_type: str = "WT"  # 任务类型，默认为WT
+        task_type: str = "WT"  # 任务类型，WT或PENDING
     ):
         """
         通用任务调度器
@@ -41,14 +46,18 @@ class TaskScheduler:
         self.retry_delay = retry_delay
         self.max_concurrent_tasks = max_concurrent_tasks
         self.semaphore = asyncio.Semaphore(max_concurrent_tasks)
-        self.processing_tasks = set()  # 正在处理的任务ID集合
+        self.processing_tasks = WeakSet()  # 自动回收已完成任务
         self.task_type = task_type
         
-        # 新增：任务队列和执行器池
+        # 任务队列和执行器池
         self.task_queue = asyncio.Queue()
         self.executor_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks)
         self.consumers = []  # 任务消费者列表
         self._running = False
+        self._logger = logging.getLogger(f"{__name__}.{task_type}")
+        
+        # 设备锁管理
+        self._device_locks = WeakValueDictionary()  # 自动回收锁
 
     async def start(self):
         """启动调度器"""
@@ -72,7 +81,7 @@ class TaskScheduler:
             for _ in range(self.max_concurrent_tasks)
         ]
         
-        logger.info(f"{self.task_type}任务调度器已启动")
+        self._logger.info(f"{self.task_type}任务调度器已启动")
 
     async def stop(self):
         """停止调度器"""
@@ -93,7 +102,7 @@ class TaskScheduler:
             await asyncio.gather(*self.consumers)
             self.consumers = []
         
-        logger.info(f"{self.task_type}任务调度器已停止")
+        self._logger.info(f"{self.task_type}任务调度器已停止")
 
     async def check_tasks(self):
         """检查任务"""
@@ -105,121 +114,136 @@ class TaskScheduler:
                 else:  # PENDING
                     tasks = TaskService.get_tasks_by_status(db, TaskStatus.PENDING)
                     if tasks:
-                        # 获取当前UTC时间戳，并加上8小时偏移量
-                        current_utc_time = time.time() + 8 * 3600
+                        # 获取当前时间戳（使用本地时间）
+                        current_time = get_current_timestamp()
+                        current_datetime = get_current_datetime()
+                        self._logger.debug(f"当前时间戳: {current_time}, 对应时间: {current_datetime}")
+                        
                         # 过滤出到期的任务
                         tasks = [
                             task for task in tasks 
-                            if task.time <= int(current_utc_time) and task.id not in self.processing_tasks
+                            if task.time <= current_time and task.id not in self.processing_tasks
                         ]
                 
                 if not tasks:
                     return
 
-                logger.info(f"发现 {len(tasks)} 个{self.task_type}任务")
+                self._logger.info(f"发现 {len(tasks)} 个{self.task_type}任务")
                 
-                # 过滤掉正在处理的任务
-                new_tasks = [
-                    task for task in tasks 
-                    if task.id not in self.processing_tasks
-                ]
+                # 按设备ID分组任务
+                tasks_by_device = {}
+                for task in tasks:
+                    # 检查任务是否已在处理中
+                    if task.id in self.processing_tasks:
+                        self._logger.debug(f"任务 {task.id} 已在处理中，跳过")
+                        continue
+                        
+                    # 获取设备信息
+                    device = task.device  # 直接从关联关系获取设备
+                    if not device:
+                        self._logger.error(f"找不到设备信息: {task.device_name}")
+                        continue
+                        
+                    if device.device_id not in tasks_by_device:
+                        tasks_by_device[device.device_id] = []
+                    tasks_by_device[device.device_id].append((task, device))
                 
-                if not new_tasks:
-                    return
-                
-                # 将任务放入队列
-                for task in new_tasks:
-                    await self.task_queue.put((task, db))
-                
+                # 处理每个设备组的任务
+                for device_id, device_tasks in tasks_by_device.items():
+                    # 按device_name排序，确保同一设备的系统按顺序执行
+                    device_tasks.sort(key=lambda x: x[0].device_name)
+                    
+                    # 将任务放入队列
+                    for task, device in device_tasks:
+                        await self.task_queue.put((task.id, device.device_id))
+
         except Exception as e:
-            logger.error(f"检查{self.task_type}任务时出错: {str(e)}")
+            self._logger.error(f"检查{self.task_type}任务时出错: {str(e)}")
 
     async def task_consumer(self):
         """任务消费者"""
         while self._running:
-            item = None  # 初始化item变量
             try:
                 # 从队列获取任务
                 item = await self.task_queue.get()
                 if item is None:  # 停止信号
                     break
                     
-                task, db = item
+                task_id, device_id = item
                 
-                # 处理任务
-                await self.handle_task(task, db)
-                
-            except asyncio.CancelledError:
-                # 任务被取消时的处理
-                break
+                async with self._get_db() as db:
+                    # 使用joinedload优化查询
+                    task = db.query(Task).options(
+                        joinedload(Task.device)
+                    ).filter(Task.id == task_id).first()
+                    
+                    if not task or task.status != self.task_type:
+                        self._logger.debug(f"跳过任务 {task_id}: 状态不匹配或任务不存在")
+                        continue
+                        
+                    device = task.device  # 直接从关联关系获取设备
+                    if not device:
+                        self._logger.error(f"任务 {task_id} 关联的设备不存在")
+                        continue
+                    
+                    # 自动创建设备锁
+                    lock = self._device_locks.setdefault(device.device_id, asyncio.Lock())
+                    async with lock:
+                        await self.handle_task(task, db, device)
             except Exception as e:
-                logger.error(f"任务消费者出错: {str(e)}")
+                self._logger.error(f"任务消费者出错: {str(e)}")
             finally:
-                if item is not None:
-                    try:
-                        self.task_queue.task_done()
-                    except ValueError:
-                        # 忽略task_done()调用次数过多的错误
-                        pass
+                self.task_queue.task_done()
 
-    async def handle_task(self, task: Task, db: Session):
+    async def handle_task(self, task: Task, db: Session, device: Device):
         """处理单个任务"""
-        # 使用信号量控制并发
-        async with self.semaphore:
-            try:
-                task_id = task.id  # 保存任务ID
+        start_time = time.time()
+        try:
+            # 使用信号量控制并发
+            async with self.semaphore:
                 # 标记任务为处理中
-                self.processing_tasks.add(task_id)
-                
-                # 重新从数据库加载任务，确保关联关系可用
-                fresh_task = db.query(Task).filter(Task.id == task_id).first()
-                if not fresh_task:
-                    logger.error(f"任务 {task_id} 不存在")
-                    return False
+                self.processing_tasks.add(task.id)
                 
                 # 处理任务（带超时控制）
                 try:
-                    # 使用asyncio.wait_for实现超时控制
                     success = await asyncio.wait_for(
-                        self.process_task(fresh_task, db),
+                        self.process_task(task, db),
                         timeout=300  # 5分钟超时
                     )
                 except asyncio.TimeoutError:
-                    logger.error(f"任务 {task_id} 执行超时")
+                    self._logger.error(f"任务 {task.id} 执行超时")
                     success = False
                 
                 # 更新任务状态
                 if success:
-                    logger.info(f"任务 {task_id} 处理成功")
-                    # 根据任务类型更新状态
+                    self._logger.info(f"任务 {task.id} 处理成功")
                     if self.task_type == "PENDING":
                         # UI自动化任务成功 -> RES
-                        TaskService.update_task_status(db, task_id, TaskStatus.RES)
+                        TaskService.update_task_status(db, task.id, TaskStatus.RES)
                     else:
                         # 文件传输任务成功 -> PENDING
-                        TaskService.update_task_status(db, task_id, TaskStatus.PENDING)
+                        TaskService.update_task_status(db, task.id, TaskStatus.PENDING)
                 else:
-                    logger.error(f"任务 {task_id} 处理失败")
-                    # 根据任务类型更新状态
+                    self._logger.error(f"任务 {task.id} 处理失败")
                     if self.task_type == "PENDING":
                         # UI自动化任务失败 -> REJ
-                        TaskService.update_task_status(db, task_id, TaskStatus.REJ)
+                        TaskService.update_task_status(db, task.id, TaskStatus.REJ)
                     else:
                         # 文件传输任务失败 -> WTERR
-                        TaskService.update_task_status(db, task_id, TaskStatus.WTERR)
-                    
-            except Exception as e:
-                logger.error(f"处理任务 {task_id} 时出错: {str(e)}")
-                # 根据任务类型更新状态
-                if self.task_type == "PENDING":
-                    # UI自动化任务异常 -> REJ
-                    TaskService.update_task_status(db, task_id, TaskStatus.REJ)
-                else:
-                    # 文件传输任务异常 -> WTERR
-                    TaskService.update_task_status(db, task_id, TaskStatus.WTERR)
-            finally:
-                # 移除处理中标记
-                self.processing_tasks.remove(task_id)
+                        TaskService.update_task_status(db, task.id, TaskStatus.WTERR)
+        except Exception as e:
+            self._logger.error(f"处理任务 {task.id} 时出错: {str(e)}")
+            if self.task_type == "PENDING":
+                # UI自动化任务异常 -> REJ
+                TaskService.update_task_status(db, task.id, TaskStatus.REJ)
+            else:
+                # 文件传输任务异常 -> WTERR
+                TaskService.update_task_status(db, task.id, TaskStatus.WTERR)
+        finally:
+            # 确保任务ID被移除，防止重复处理
+            self.processing_tasks.discard(task.id)
+            elapsed_time = time.time() - start_time
+            self._logger.info(f"任务 {task.id} 处理完成，耗时: {elapsed_time:.2f}秒")
 
     async def process_task(self, task: Task, db: Session) -> bool:
         """任务处理的核心逻辑"""
@@ -233,12 +257,12 @@ class TaskScheduler:
                     return True
                     
                 retry_count += 1
-                logger.warning(f"任务 {task.id} 失败，第 {retry_count} 次重试")
+                self._logger.warning(f"任务 {task.id} 失败，第 {retry_count} 次重试")
                 await asyncio.sleep(self.retry_delay)
                 
             except Exception as e:
                 retry_count += 1
-                logger.error(f"处理任务 {task.id} 出错: {str(e)}")
+                self._logger.error(f"处理任务 {task.id} 出错: {str(e)}")
                 await asyncio.sleep(self.retry_delay)
         
         return False
@@ -249,6 +273,10 @@ class TaskScheduler:
         db = SessionLocal()
         try:
             yield db
+        except Exception as e:
+            db.rollback()
+            self._logger.error(f"数据库会话出错: {str(e)}")
+            raise
         finally:
             db.close()
 

@@ -1,6 +1,7 @@
 from datetime import datetime
 import pytz
 from app.core.config import settings
+import time
 
 def timestamp_to_datetime(timestamp: int) -> str:
     """
@@ -50,3 +51,28 @@ def datetime_to_timestamp(date_str: str) -> int:
     
     # 转换为UTC时间戳
     return int(local_time.timestamp())
+
+def get_current_timestamp() -> int:
+    """
+    获取当前时间戳，考虑时区设置
+    
+    Returns:
+        int: 当前时间戳（秒）
+    """
+    # 获取当前UTC时间戳
+    current_utc = int(time.time())
+    
+    # 转换为本地时间字符串
+    local_datetime = timestamp_to_datetime(current_utc)
+    
+    # 转换回时间戳，这样就会考虑时区设置
+    return datetime_to_timestamp(local_datetime)
+
+def get_current_datetime() -> str:
+    """
+    获取当前时间的格式化字符串，考虑时区设置
+    
+    Returns:
+        str: yyyymmddhhmmss格式的当前时间字符串
+    """
+    return timestamp_to_datetime(int(time.time()))

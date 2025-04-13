@@ -6,7 +6,7 @@ from app.schemas.task import TaskCreate, TaskUpdate, TaskQuery, TaskResponse
 from app.core.config import settings
 from app.utils.file import get_file_paths
 from app.core.status_code import StatusCode
-from app.utils.time_utils import timestamp_to_datetime
+from app.utils.time_utils import get_current_timestamp, get_current_datetime
 import time
 import json
 import os
@@ -125,7 +125,9 @@ class TaskService:
                 except Exception as e:
                     logger.error(f"解析旧文件路径失败: {str(e)}")
             
-            current_time = int(time.time())
+            # 计算当前时间
+            current_time = get_current_timestamp()
+            current_datetime = get_current_datetime()
             
             # 更新任务信息
             if task_update.device_name is not None:
@@ -148,12 +150,11 @@ class TaskService:
                 # 如果有新文件，将状态设置为 WT
                 task.status = TaskStatus.WT
                 
-                # 转换时间戳为格式化时间
-                formatted_time = timestamp_to_datetime(task.time)
-                
                 # 使用格式化时间创建临时文件目录
-                temp_dir = os.path.join(settings.UPLOAD_DIR, "temp", str(int(time.time())))
-                os.makedirs(temp_dir, exist_ok=True)
+                current_time = get_current_timestamp()
+                current_datetime = get_current_datetime()
+                temp_dir = os.path.join(settings.UPLOAD_DIR, "temp", str(current_time))
+                os.makedirs(temp_dir, mode=0o755, exist_ok=True)
                 
                 # 保存文件到临时目录并收集文件路径
                 try:
@@ -166,6 +167,9 @@ class TaskService:
                             file_data = b64decode(file.data)
                             with open(temp_file_path, 'wb') as f:
                                 f.write(file_data)
+                            
+                            # 设置文件权限
+                            os.chmod(temp_file_path, 0o644)
                             
                             # 显式调用垃圾回收以确保文件句柄释放
                             import gc
@@ -181,15 +185,17 @@ class TaskService:
                     upload.files = json.dumps(new_files)
                     
                     # 如果一切正常，将文件从临时目录移动到最终目录
-                    final_dir = os.path.join(settings.UPLOAD_DIR, task.device_name, formatted_time)
-                    os.makedirs(final_dir, exist_ok=True)
+                    final_dir = os.path.join(settings.UPLOAD_DIR, task.device_name, current_datetime)
+                    os.makedirs(final_dir, mode=0o755, exist_ok=True)
                     
                     # 移动文件到最终目录
                     for file in task_update.files:
                         src_path = os.path.join(temp_dir, file.filename)
                         dst_path = os.path.join(final_dir, file.filename)
                         if os.path.exists(src_path):
-                            shutil.move(src_path, dst_path)
+                            shutil.copy2(src_path, dst_path)
+                            # 设置目标文件权限
+                            os.chmod(dst_path, 0o644)
                     
                     # 清理临时目录
                     if os.path.exists(temp_dir):

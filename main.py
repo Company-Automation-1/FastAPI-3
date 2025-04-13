@@ -11,6 +11,7 @@ from app.db.session import engine, SessionLocal, close_db_connection
 from app.db.base_class import Base
 from app.services.task import TaskService
 from app.services.app_lifecycle import AppLifecycle
+# from app.services.garbage_cleanup import GarbageCleanupService
 import logging
 import asyncio
 import signal
@@ -133,16 +134,21 @@ async def startup_event():
             task_type="PENDING"  # UI自动化任务
         )
         
+        # 创建垃圾清理服务
+        # garbage_cleanup = GarbageCleanupService()
+        
         # 启动调度器
         await task_scheduler.start()
         await ui_scheduler.start()
+        # await garbage_cleanup.start()
         
         # 创建应用生命周期管理器
         global app_lifecycle
         app_lifecycle = AppLifecycle(
             task_scheduler=task_scheduler,
             ui_scheduler=ui_scheduler,
-            adb_transfer_service=adb_service
+            adb_transfer_service=adb_service,
+            # garbage_cleanup=garbage_cleanup
         )
         
         logger.info("所有任务调度器已启动")
@@ -160,6 +166,8 @@ async def shutdown_event():
             await app_lifecycle.task_scheduler.stop()
         if app_lifecycle.ui_scheduler:
             await app_lifecycle.ui_scheduler.stop()
+        # if app_lifecycle.garbage_cleanup:
+        #     await app_lifecycle.garbage_cleanup.stop()
             
         # 关闭数据库连接池
         close_db_connection()

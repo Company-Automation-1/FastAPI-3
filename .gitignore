@@ -8,3 +8,23 @@ wheels/
 
 # Virtual environments
 .venv
+
+# 环境变量
+.env
+
+# 测试文件
+tests/
+pytest.ini
+test.db
+
+# 上传文件
+uploads/
+
+# 日志文件
+logs/
+*.log
+
+# 临时文件
+tmp/
+
+# 测试文件

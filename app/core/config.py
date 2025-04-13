@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     ADB_SERVER_HOST: str = "127.0.0.1"  # ADB服务器主机
     ADB_SERVER_PORT: int = 5037  # ADB服务器端口
 
+    # # 垃圾清理配置
+    # GARBAGE_CLEANUP_INTERVAL: int = 3600  # 清理检查间隔（秒）
+    # GARBAGE_EXPIRATION_HOURS: int = 24    # 过期时间（小时）
+    # GARBAGE_RETRY_DELAY: int = 300        # 重试延迟（秒）
+
     @property
     def MYSQL_URL(self) -> str:
         password = quote_plus(self.MYSQL_PASSWORD)

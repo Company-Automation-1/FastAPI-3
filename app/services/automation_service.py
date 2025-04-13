@@ -13,7 +13,8 @@ class AutomationService:
 
     def __init__(self):
         self.adb_service = ADBTransferService()
-        logger.info("初始化自动化任务服务")
+        self._logger = logging.getLogger(f"{__name__}.Automation")
+        self._logger.info("初始化自动化任务服务")
 
     async def execute_pending_task(self, task: Task, db: Session) -> bool:
         """
@@ -28,12 +29,12 @@ class AutomationService:
         """
         try:
             task_id = task.id  # 保存任务ID
-            logger.info(f"开始执行PENDING任务: {task_id}")
+            self._logger.info(f"开始执行PENDING任务: {task_id}")
             
             # 重新从数据库加载任务，确保关联关系可用
             fresh_task = db.query(Task).filter(Task.id == task_id).first()
             if not fresh_task:
-                logger.error(f"任务 {task_id} 不存在")
+                self._logger.error(f"任务 {task_id} 不存在")
                 return False
             
             # 直接通过关联关系获取设备和上传信息
@@ -41,11 +42,11 @@ class AutomationService:
             upload = fresh_task.upload
             
             if not device:
-                logger.error(f"未找到设备: {fresh_task.device_name}")
+                self._logger.error(f"未找到设备: {fresh_task.device_name}")
                 return False
             
             if not upload:
-                logger.error(f"未找到上传记录: {fresh_task.upload_id}")
+                self._logger.error(f"未找到上传记录: {fresh_task.upload_id}")
                 return False
 
             # 从task.time获取时间文件夹名称
@@ -62,12 +63,12 @@ class AutomationService:
             )
             
             if success:
-                logger.info(f"任务 {task_id} 执行成功")
+                self._logger.info(f"任务 {task_id} 执行成功")
                 return True
             else:
-                logger.error(f"任务 {task_id} 执行失败")
+                self._logger.error(f"任务 {task_id} 执行失败")
                 return False
                 
         except Exception as e:
-            logger.error(f"执行任务时出错: {str(e)}")
+            self._logger.error(f"执行任务时出错: {str(e)}")
             return False 

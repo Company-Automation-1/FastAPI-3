@@ -1,13 +1,23 @@
 import asyncio
 import logging
 import signal
+from app.services.scheduler import TaskScheduler
+from app.services.adb_transfer import ADBTransferService
+from app.services.garbage_cleanup import GarbageCleanupService
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 class AppLifecycle:
     """应用程序生命周期管理"""
     
-    def __init__(self, task_scheduler, ui_scheduler, adb_transfer_service):
+    def __init__(
+        self,
+        task_scheduler: Optional[TaskScheduler] = None,
+        ui_scheduler: Optional[TaskScheduler] = None,
+        adb_transfer_service: Optional[ADBTransferService] = None,
+        garbage_cleanup: Optional[GarbageCleanupService] = None
+    ):
         """
         初始化应用程序生命周期管理
         
@@ -15,10 +25,12 @@ class AppLifecycle:
             task_scheduler: 文件传输任务调度器
             ui_scheduler: UI自动化任务调度器
             adb_transfer_service: ADB传输服务
+            garbage_cleanup: 垃圾清理服务
         """
         self.task_scheduler = task_scheduler
         self.ui_scheduler = ui_scheduler
         self.adb_transfer_service = adb_transfer_service
+        self.garbage_cleanup = garbage_cleanup
     
     async def startup(self):
         """应用程序启动时执行"""

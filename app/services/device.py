@@ -2,6 +2,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.models.device import Device, DeviceCreate, DeviceUpdate
 import time
+from app.utils.time_utils import get_current_timestamp
 
 class DeviceService:
     @staticmethod
@@ -22,7 +23,7 @@ class DeviceService:
     @staticmethod
     def create_device(db: Session, device: DeviceCreate) -> Device:
         """创建设备"""
-        current_time = int(time.time())
+        current_time = get_current_timestamp()
         db_device = Device(
             **device.model_dump(),
             createtime=current_time,
@@ -47,7 +48,8 @@ class DeviceService:
         
         update_data = device.model_dump(exclude_unset=True)
         if update_data:
-            update_data["updatetime"] = int(time.time())
+            current_time = get_current_timestamp()
+            update_data["updatetime"] = current_time
             for key, value in update_data.items():
                 setattr(db_device, key, value)
             
